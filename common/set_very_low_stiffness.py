@@ -61,7 +61,7 @@ if __name__ == '__main__':
     action_impedance_client = actionlib.SimpleActionClient("/" + prefix + "_arm/cartesian_impedance", CartesianImpedanceAction)
     action_impedance_client.wait_for_server()
 
-    moveImpedance(Wrench(Vector3(1.0, 1.0, 1.0), Vector3(1.0, 1.0, 1.0)), 1.0)
+    moveImpedance(Wrench(Vector3(0.2, 0.2, 0.2), Vector3(0.2, 0.2, 0.2)), 1.0)
     rospy.sleep(1.1)
 
 

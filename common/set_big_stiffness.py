@@ -41,7 +41,7 @@ import PyKDL
 def moveImpedance(k, t):
     global action_impedance_client
     action_impedance_goal = CartesianImpedanceGoal()
-    action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
+    action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
     action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
     rospy.Duration(t),
     CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
@@ -117,7 +117,7 @@ if __name__ == '__main__':
 
     # change the stiffness
     print "changing stiffness for door approach"
-    moveImpedance(Wrench(Vector3(800.0, 800.0, 800.0), Vector3(300.0, 300.0, 300.0)), 4.0)
+    moveImpedance(Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0)), 4.0)
     rospy.sleep(4.0)
 
 

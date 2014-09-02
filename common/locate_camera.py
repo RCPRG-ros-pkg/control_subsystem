@@ -32,152 +32,194 @@ import rospy
 import math
 
 import std_msgs.msg
-import ar_track_alvar.msg
-from ar_track_alvar.msg import *
-#from visualization_msgs.msg import Marker
-#from visualization_msgs.msg import MarkerArray
-#from geometry_msgs.msg import Point
-#from sensor_msgs.msg import Image
 
 import tf
 from tf import *
 from tf.transformations import * 
-#import tf_conversions.posemath as pm
 from tf2_msgs.msg import *
 
-from collections import deque
+import PyKDL
+import tf_conversions.posemath as pm
+import copy
+from scipy import optimize
+import random
 
-left_makrer_id=2
 right_makrer_id=1
 
-#tool_marker_left_position = [ 0.00013558,  0.00033355,  0.02499741]
-#tool_marker_left_orientation = [ 0.00265232,  0.00669491,  0.99993464, -0.00887976]
-tool_marker_left_position = [ -2.72290709e-05,   5.56445479e-04,   2.49937918e-02]
-tool_marker_left_orientation = [ -6.22007822e-04,   1.11255436e-02,   9.99913731e-01,  -6.95451356e-03]
+def locateMarker(T_T2_7, T_C_M):
+        if len(T_T2_7) != len(T_C_M):
+            return None
+        if len(T_T2_7) < 2:
+            return None
 
-#tool_marker_right_position = [ 0.00038019,  0.0001039,   0.02499689]
-#tool_marker_right_orientation = [  7.60508486e-03,   2.07433971e-03,   9.99968812e-01,   4.84539739e-04]
-tool_marker_right_position = [  5.31013495e-05,  -1.31241002e-04,   2.49995991e-02]
-tool_marker_right_orientation = [ 0.00104553, -0.00263145,  0.99997629,  0.00627708]
+        T_70_7i = []
+        T_M0_Mi = []
 
-def PoseToTuple(p):
-    return [p.position.x, p.position.y, p.position.z], [p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w]
+        for i in range(1, len(T_T2_7)):
+            T_70_7i.append(T_T2_7[0].Inverse() * T_T2_7[i])
+            T_M0_Mi.append(T_C_M[0].Inverse() * T_C_M[i])
 
-def PoseToPosition(p):
-    return [p.position.x, p.position.y, p.position.z, 1]
+        def estOrientation():
+            def calc_R(rx, ry, rz):
+                R_7_M = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz))
+                diff = []
+                for i in range(0,len(T_70_7i)):
+                    diff.append(PyKDL.diff( T_70_7i[i] * R_7_M, R_7_M * T_M0_Mi[i] ))
+                ret = [d.rot.x() for d in diff] + [d.rot.y() for d in diff] + [d.rot.z() for d in diff]
+                return ret
+            def f_2(c):
+                """ calculate the algebraic distance between each contact point and jar surface pt """
+                Di = calc_R(*c)
+                return Di
+            angle_estimate = random.random(), random.random(), random.random()
+            angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+            score = calc_R(angle_2[0],angle_2[1],angle_2[2])
+            score_v = 0.0
+            for s in score:
+                score_v += s*s
+            return [score_v, PyKDL.Frame(PyKDL.Rotation.EulerZYX(angle_2[0],angle_2[1],angle_2[2]))]
 
-def alvarMarkerCallback(data):
-    global br
-    global tf_listener
-    global tool_marker_left
-    global tool_marker_right
-    global cam
-    global marker_visible
-    marker_count = len(data.markers)
+        best_score = 1000000.0
+        best_R_7_M = PyKDL.Frame()
+        for i in range(0, 10):
+            score, R_7_M = estOrientation()
+            if score < best_score:
+                best_score = score
+                best_R_7_M = copy.deepcopy(R_7_M)
 
-    for i in range(0, marker_count):
+        def estPos(R_7_M_est):
+            rot_mx = copy.deepcopy(R_7_M_est.M)
+            def calc_R(px, py, pz):
+                R_7_M = PyKDL.Frame(rot_mx, PyKDL.Vector(px, py, pz))
+                diff = []
+                for i in range(0,len(T_70_7i)):
+                    diff.append(PyKDL.diff( T_70_7i[i] * R_7_M, R_7_M * T_M0_Mi[i] ))
+                ret = [d.vel.x() for d in diff] + [d.vel.y() for d in diff] + [d.vel.z() for d in diff]
+                return ret
+            def f_2(c):
+                """ calculate the algebraic distance between each contact point and jar surface pt """
+                Di = calc_R(*c)
+                return Di
+            pos_estimate = 0.0, 0.0, 0.0
+            pos_2, ier = optimize.leastsq(f_2, pos_estimate, maxfev = 10000)
+            score = calc_R(pos_2[0],pos_2[1],pos_2[2])
+            score_v = 0.0
+            for s in score:
+                score_v += s*s
+            return [score_v, PyKDL.Frame(rot_mx, PyKDL.Vector(pos_2[0], pos_2[1], pos_2[2]))]
 
-        if (data.markers[i].id == left_makrer_id) or (data.markers[i].id == right_makrer_id):
-            prefix = "left"
-            tool_marker = tool_marker_left
-            if data.markers[i].id == right_makrer_id:
-                prefix = "right"
-                tool_marker = tool_marker_right
+        best_score = 1000000.0
+        best_T_7_M = PyKDL.Frame()
+        for i in range(0, 10):
+            score, T_7_M = estPos(best_R_7_M)
+            if score < best_score:
+                best_score = score
+                best_T_7_M = copy.deepcopy(T_7_M)
 
-            pose = data.markers[i].pose.pose
-            try:
-#                tf_listener.waitForTransform('torso_link2', prefix+'_arm_7_link', rospy.Time.now(), rospy.Duration(1.0))
-                torso_tool_tf = tf_listener.lookupTransform('torso_link2', prefix+'_arm_7_link', rospy.Time(0))
-            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-                return
+        return [best_score, best_T_7_M]
 
-            pose_t = PoseToTuple(pose)
-            cam = quaternion_matrix(pose_t[1])
-            cam[:3, 3] = PoseToPosition(pose)[:3]
-            cam = inverse_matrix(cam)
+def meanOrientation(T):
+    R = []
+    for t in T:
+        R.append( copy.deepcopy( PyKDL.Frame(t.M) ) )
 
-            torso_tool = quaternion_matrix(torso_tool_tf[1])
-            torso_tool[:3,3] = (torso_tool_tf[0])[:3]
-
-            cam = numpy.dot(tool_marker, cam)
-            cam = numpy.dot(torso_tool, cam)
-
-            marker_visible = True
+    def calc_R(rx, ry, rz):
+        R_mean = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz))
+        diff = []
+        for r in R:
+            diff.append(PyKDL.diff( R_mean, r ))
+        ret = [d.rot.x() for d in diff] + [d.rot.y() for d in diff] + [d.rot.z() for d in diff]
+        return ret
+    def f_2(c):
+        """ calculate the algebraic distance between each contact point and jar surface pt """
+        Di = calc_R(*c)
+        return Di
+    angle_estimate = R[0].M.GetEulerZYX()
+    angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+    score = calc_R(angle_2[0],angle_2[1],angle_2[2])
+    score_v = 0.0
+    for s in score:
+        score_v += s*s
+    return [score_v, PyKDL.Frame(PyKDL.Rotation.EulerZYX(angle_2[0],angle_2[1],angle_2[2]))]
 
 if __name__ == "__main__":
     a = []
     for arg in sys.argv:
         a.append(arg)
 
-    tool_marker_left = quaternion_matrix(tool_marker_left_orientation)
-    tool_marker_left[:3, 3] = tool_marker_left_position[:3]
-
-    tool_marker_right = quaternion_matrix(tool_marker_right_orientation)
-    tool_marker_right[:3, 3] = tool_marker_right_position[:3]
-
-    cam = identity_matrix()
-    marker_visible = False
-
     rospy.init_node('head_position', anonymous=True)
-    print "Subscribing to tf"
-    tf_listener = tf.TransformListener();
+
+    tf_listener = tf.TransformListener()
+    rospy.sleep(2.0)
+
+    T_C_M = []
+    T_T2_7 = []
+    T_C_M_stable = PyKDL.Frame()
+    T_T2_7_stable = PyKDL.Frame()
+    stable_t = 0
+    while True:
+        rospy.sleep(0.1)
+        try:
+            pose = tf_listener.lookupTransform('camera', 'ar_marker_'+str(right_makrer_id), rospy.Time(0))
+            T_C_M_current = pm.fromTf(pose)
+            pose = tf_listener.lookupTransform('torso_link2', 'right_arm_7_link', rospy.Time(0))
+            T_T2_7_current = pm.fromTf(pose)
+        except:
+            continue
+
+        d1 = PyKDL.diff(T_C_M_stable, T_C_M_current)
+        d2 = PyKDL.diff(T_T2_7_stable, T_T2_7_current)
+        score = d2.vel.Norm() + d2.rot.Norm()
+#        print score
+        if score > 0.002:
+            stable_t = 0
+            T_C_M_stable = copy.deepcopy(T_C_M_current)
+            T_T2_7_stable = copy.deepcopy(T_T2_7_current)
+        else:
+            stable_t += 1
+            add = True
+            if stable_t > 10:
+                for t in T_T2_7:
+                    d = PyKDL.diff(T_T2_7_current, t)
+                    if d.rot.Norm() < 0.1:
+                        add = False
+                        break
+                if add:
+                    print "added"
+                    T_C_M.append(copy.deepcopy(T_C_M_current))
+                    T_T2_7.append(copy.deepcopy(T_T2_7_current))
+
+        if len(T_C_M) > 4 or rospy.is_shutdown():
+            break
+
+    score,T_7_M = locateMarker(T_T2_7, T_C_M)
+
+    q = T_7_M.M.GetQuaternion()
+    print "PyKDL.Frame(PyKDL.Rotation.Quaternion(%s,%s,%s,%s), PyKDL.Vector(%s,%s,%s))"%(q[0], q[1], q[2], q[3], T_7_M.p.x(), T_7_M.p.y(), T_7_M.p.z())
+    print "score: %s"%(score)
+    print T_7_M
+
+    T_T2_C = []
+    for i in range(0, len(T_C_M)):
+        T_T2_C.append( T_T2_7[i] * T_7_M * T_C_M[i].Inverse() )
+
+    mean_p = PyKDL.Vector()
+    for i in range(0, len(T_T2_C)):
+        mean_p += T_T2_C[i].p
+
+    mean_p = mean_p * (1.0/len(T_T2_C))
+    score,mean_R = meanOrientation(T_T2_C)
+    print "mean rotation score: %s"%(score)
+
     br = tf.TransformBroadcaster()
-    print "Subscribing to /ar_pose_marker"
-    rospy.Subscriber('/ar_pose_marker', AlvarMarkers, alvarMarkerCallback)
+    rospy.sleep(2.0)
 
-    print "Do not move the camera!"
-    print "Please show me the wrist marker..."
-
-    queue_o = deque()
-    queue_t = deque()
-
-    steps = 30
-#    rospy.spin()
-    rate = 10.0
-    r = rospy.Rate(rate)	# 10 Hz
-    length = 0
+    T_T2_C_est = PyKDL.Frame(copy.deepcopy(mean_R.M), mean_p)
+    q = T_T2_C_est.M.GetQuaternion()
+    print [T_T2_C_est.p.x(), T_T2_C_est.p.y(), T_T2_C_est.p.z()]
+    print [q[0], q[1], q[2], q[3]]
     while not rospy.is_shutdown():
-#        print "loop: %s"%(marker_visible)
-        if marker_visible:
-            marker_visible = False
-            orientation = quaternion_from_matrix(cam)
-#            euler = euler_from_matrix(cam)
-            translation = translation_from_matrix(cam)
-            queue_o.append(orientation)#numpy.array(euler))
-            queue_t.append(translation)
-            length += 1
-            if length>steps:
-                queue_o.popleft()
-                queue_t.popleft()
-                length -= 1
+        br.sendTransform([T_T2_C_est.p.x(), T_T2_C_est.p.y(), T_T2_C_est.p.z()], [q[0], q[1], q[2], q[3]], rospy.Time.now(), "camera", "torso_link2")
+        rospy.sleep(0.1)
 
-            if length == steps:
-                mean_o = reduce(lambda x, y: x+y, queue_o)
-                mean_t = reduce(lambda x, y: x+y, queue_t)
-                mean_o[0] /= 1.0*steps
-                mean_o[1] /= 1.0*steps
-                mean_o[2] /= 1.0*steps
-                mean_o[3] /= 1.0*steps
-                mean_t[0] /= 1.0*steps
-                mean_t[1] /= 1.0*steps
-                mean_t[2] /= 1.0*steps
-                variation_o = 0
-                variation_t = 0
-                for o in queue_o:
-                    variation_o = (o[0]-mean_o[0])*(o[0]-mean_o[0]) + (o[1]-mean_o[1])*(o[1]-mean_o[1]) + (o[2]-mean_o[2])*(o[2]-mean_o[2]) + (o[3]-mean_o[3])*(o[3]-mean_o[3])
-                for t in queue_t:
-                    variation_t = (t[0]-mean_t[0])*(t[0]-mean_t[0]) + (t[1]-mean_t[1])*(t[1]-mean_t[1]) + (t[2]-mean_t[2])*(t[2]-mean_t[2])
-                if (variation_o<0.000001) and (variation_t<0.000001):
-                    print "o: %s   t: %s"%(variation_o, variation_t)
-                    break
-#            math.sqrt(numpy.dot(euler,euler))
-#            math.sqrt(numpy.dot(translation,translation))
-        
-        r.sleep()
-
-    while not rospy.is_shutdown():
-
-        br.sendTransform(mean_t, mean_o, rospy.Time.now(), "camera", "torso_link2")
-#        br.sendTransform(translation_from_matrix(cam), quaternion_from_matrix(cam), rospy.Time.now(), "camera", "torso_link2")
-        r.sleep()
 
