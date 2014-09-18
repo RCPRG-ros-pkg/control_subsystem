@@ -44,7 +44,7 @@ import copy
 from scipy import optimize
 import random
 
-right_makrer_id=1
+right_makrer_id=2
 
 def locateMarker(T_T2_7, T_C_M):
         if len(T_T2_7) != len(T_C_M):
