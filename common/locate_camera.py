@@ -152,6 +152,7 @@ if __name__ == "__main__":
     tf_listener = tf.TransformListener()
     rospy.sleep(2.0)
 
+    print "waiting for markers..."
     T_C_M = []
     T_T2_7 = []
     T_C_M_stable = PyKDL.Frame()
