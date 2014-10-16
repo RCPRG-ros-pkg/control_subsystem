@@ -38,7 +38,7 @@ if __name__ == '__main__':
         rospy.wait_for_service('/controller_manager/switch_controller')
         conmanSwitch = rospy.ServiceProxy('/controller_manager/switch_controller', SwitchController)
         # '2' is for STRICT
-        if conmanSwitch(['FK', 'JntImp', 'TrajectoryGeneratorJoint'], ['PoseIntLeft', 'PoseIntRight'], 2):
+        if conmanSwitch(['JntImp', 'TrajectoryGeneratorJoint'], ['CImp', 'PoseIntLeft', 'PoseIntRight'], 2):
             print "ok"
         else:
             print "failed"
