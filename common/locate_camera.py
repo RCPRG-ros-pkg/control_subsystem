@@ -43,6 +43,7 @@ import tf_conversions.posemath as pm
 import copy
 from scipy import optimize
 import random
+import numpy as np
 
 right_makrer_id=2
 
@@ -52,27 +53,57 @@ def locateMarker(T_T2_7, T_C_M):
         if len(T_T2_7) < 2:
             return None
 
-        T_70_7i = []
-        T_M0_Mi = []
+        weights_ori = []
+        weights_pos = []
+        z_limit = 0.3
+        for idx in range(0, len(T_C_M)):
+            v = T_C_M[idx] * PyKDL.Vector(0,0,1) - T_C_M[idx] * PyKDL.Vector()
+            if v.z() > -z_limit:
+                weights_ori.append(0.0)
+                weights_pos.append(0.0)
+                continue
+            # v.z() is in range (-1.0, -z_limit)
+            weight = ((-v.z()) - z_limit)/(1.0-z_limit)
+            if weight > 1.0 or weight < 0.0:
+                print "error: weight==%s"%(weight)
+            weights_ori.append(1.0-weight)
+            weights_pos.append(weight)
 
-        for i in range(1, len(T_T2_7)):
-            T_70_7i.append(T_T2_7[0].Inverse() * T_T2_7[i])
-            T_M0_Mi.append(T_C_M[0].Inverse() * T_C_M[i])
+        best_ori_idx = weights_ori.index( max(weights_ori) )
+        best_pos_idx = weights_pos.index( max(weights_pos) )
+        print "best orientation index: %s"%(best_ori_idx)
+        print "best position index: %s"%(best_pos_idx)
+        T_7bo_7i = []
+        T_Mbo_Mi = []
+        for idx in range(0, len(T_T2_7)):
+            T_7bo_7i.append(T_T2_7[best_ori_idx].Inverse() * T_T2_7[idx])
+            T_Mbo_Mi.append(T_C_M[best_ori_idx].Inverse() * T_C_M[idx])
+
+        T_7bp_7i = []
+        T_Mbp_Mi = []
+        for idx in range(0, len(T_T2_7)):
+            T_7bp_7i.append(T_T2_7[best_pos_idx].Inverse() * T_T2_7[idx])
+            T_Mbp_Mi.append(T_C_M[best_pos_idx].Inverse() * T_C_M[idx])
 
         def estOrientation():
             def calc_R(rx, ry, rz):
                 R_7_M = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz))
-                diff = []
-                for i in range(0,len(T_70_7i)):
-                    diff.append(PyKDL.diff( T_70_7i[i] * R_7_M, R_7_M * T_M0_Mi[i] ))
-                ret = [d.rot.x() for d in diff] + [d.rot.y() for d in diff] + [d.rot.z() for d in diff]
+                ret = []
+                for idx in range(0,len(T_7bo_7i)):
+                    diff = PyKDL.diff( T_7bo_7i[idx] * R_7_M, R_7_M * T_Mbo_Mi[idx] )
+                    ret.append( diff.rot.Norm() * weights_ori[idx] )
                 return ret
             def f_2(c):
                 """ calculate the algebraic distance between each contact point and jar surface pt """
                 Di = calc_R(*c)
                 return Di
+            def sumf_2(p):
+                return math.fsum(np.array(f_2(p))**2)
             angle_estimate = random.random(), random.random(), random.random()
-            angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+#            angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+            # least squares with constraints
+            angle_2 = optimize.fmin_slsqp(sumf_2, angle_estimate, bounds=[(-math.pi, math.pi),(-math.pi, math.pi),(-math.pi, math.pi)], iprint=0)
+
             score = calc_R(angle_2[0],angle_2[1],angle_2[2])
             score_v = 0.0
             for s in score:
@@ -91,10 +122,10 @@ def locateMarker(T_T2_7, T_C_M):
             rot_mx = copy.deepcopy(R_7_M_est.M)
             def calc_R(px, py, pz):
                 R_7_M = PyKDL.Frame(rot_mx, PyKDL.Vector(px, py, pz))
-                diff = []
-                for i in range(0,len(T_70_7i)):
-                    diff.append(PyKDL.diff( T_70_7i[i] * R_7_M, R_7_M * T_M0_Mi[i] ))
-                ret = [d.vel.x() for d in diff] + [d.vel.y() for d in diff] + [d.vel.z() for d in diff]
+                ret = []
+                for idx in range(0,len(T_7bp_7i)):
+                    diff = PyKDL.diff( T_7bp_7i[idx] * R_7_M, R_7_M * T_Mbp_Mi[idx] )
+                    ret.append( diff.vel.Norm() * weights_pos[idx] )
                 return ret
             def f_2(c):
                 """ calculate the algebraic distance between each contact point and jar surface pt """
@@ -118,29 +149,52 @@ def locateMarker(T_T2_7, T_C_M):
 
         return [best_score, best_T_7_M]
 
-def meanOrientation(T):
+def meanOrientation(T, weights=None):
     R = []
     for t in T:
-        R.append( copy.deepcopy( PyKDL.Frame(t.M) ) )
-
+        R.append( PyKDL.Frame(copy.deepcopy(t.M)) )
+    if weights == None:
+        wg = list( np.ones(len(T)) )
+    else:
+        wg = weights
+    wg_sum = sum(weights)
     def calc_R(rx, ry, rz):
         R_mean = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz))
         diff = []
         for r in R:
             diff.append(PyKDL.diff( R_mean, r ))
-        ret = [d.rot.x() for d in diff] + [d.rot.y() for d in diff] + [d.rot.z() for d in diff]
+        ret = []
+        for idx in range(0, len(diff)):
+            rot_err = diff[idx].rot.Norm()
+            ret.append(rot_err * wg[idx] / wg_sum)
         return ret
     def f_2(c):
         """ calculate the algebraic distance between each contact point and jar surface pt """
         Di = calc_R(*c)
         return Di
+    def sumf_2(p):
+        return math.fsum(np.array(f_2(p))**2)
     angle_estimate = R[0].M.GetEulerZYX()
-    angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+#    angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+    # least squares with constraints
+    angle_2 = optimize.fmin_slsqp(sumf_2, angle_estimate, bounds=[(-math.pi, math.pi),(-math.pi, math.pi),(-math.pi, math.pi)], iprint=0)
+
     score = calc_R(angle_2[0],angle_2[1],angle_2[2])
     score_v = 0.0
     for s in score:
         score_v += s*s
     return [score_v, PyKDL.Frame(PyKDL.Rotation.EulerZYX(angle_2[0],angle_2[1],angle_2[2]))]
+
+def meanPosition(T, weights=None):
+    if weights == None:
+        wg = list( np.ones(len(T)) )
+    else:
+        wg = weights
+    wg_sum = sum(weights)
+    mean_p = PyKDL.Vector()
+    for idx in range(0, len(T)):
+        mean_p += T[idx].p * wg[idx] / wg_sum
+    return mean_p
 
 if __name__ == "__main__":
     a = []
@@ -171,7 +225,6 @@ if __name__ == "__main__":
         d1 = PyKDL.diff(T_C_M_stable, T_C_M_current)
         d2 = PyKDL.diff(T_T2_7_stable, T_T2_7_current)
         score = d2.vel.Norm() + d2.rot.Norm()
-#        print score
         if score > 0.002:
             stable_t = 0
             T_C_M_stable = copy.deepcopy(T_C_M_current)
@@ -186,11 +239,16 @@ if __name__ == "__main__":
                         add = False
                         break
                 if add:
-                    print "added"
-                    T_C_M.append(copy.deepcopy(T_C_M_current))
-                    T_T2_7.append(copy.deepcopy(T_T2_7_current))
+                    z_limit = 0.6
+                    v = T_C_M_current * PyKDL.Vector(0,0,1) - T_C_M_current * PyKDL.Vector()
+                    if v.z() > -z_limit:
+                        print "the marker angle is too big"
+                    else:
+                        print "added"
+                        T_C_M.append(copy.deepcopy(T_C_M_current))
+                        T_T2_7.append(copy.deepcopy(T_T2_7_current))
 
-        if len(T_C_M) > 4 or rospy.is_shutdown():
+        if len(T_C_M) > 5 or rospy.is_shutdown():
             break
 
     score,T_7_M = locateMarker(T_T2_7, T_C_M)
@@ -200,16 +258,28 @@ if __name__ == "__main__":
     print "score: %s"%(score)
     print T_7_M
 
+    weights_ori = []
+    weights_pos = []
+    z_limit = 0.6
+    for idx in range(0, len(T_C_M)):
+        v = T_C_M[idx] * PyKDL.Vector(0,0,1) - T_C_M[idx] * PyKDL.Vector()
+        if v.z() > -z_limit:
+            weights_ori.append(0.0)
+            weights_pos.append(0.0)
+            continue
+        # v.z() is in range (-1.0, -z_limit)
+        weight = ((-v.z()) - z_limit)/(1.0-z_limit)
+        if weight > 1.0 or weight < 0.0:
+            print "error: weight==%s"%(weight)
+        weights_ori.append(1.0-weight)
+        weights_pos.append(weight)
+
     T_T2_C = []
     for i in range(0, len(T_C_M)):
         T_T2_C.append( T_T2_7[i] * T_7_M * T_C_M[i].Inverse() )
 
-    mean_p = PyKDL.Vector()
-    for i in range(0, len(T_T2_C)):
-        mean_p += T_T2_C[i].p
-
-    mean_p = mean_p * (1.0/len(T_T2_C))
-    score,mean_R = meanOrientation(T_T2_C)
+    mean_p = meanPosition(T_T2_C, weights_pos)
+    score,mean_R = meanOrientation(T_T2_C, weights_ori)
     print "mean rotation score: %s"%(score)
 
     br = tf.TransformBroadcaster()
