@@ -217,7 +217,7 @@ if __name__ == "__main__":
         try:
             pose = tf_listener.lookupTransform('camera', 'ar_marker_'+str(right_makrer_id), rospy.Time(0))
             T_C_M_current = pm.fromTf(pose)
-            pose = tf_listener.lookupTransform('torso_link2', 'right_arm_7_link', rospy.Time(0))
+            pose = tf_listener.lookupTransform('head_tilt_link', 'right_arm_7_link', rospy.Time(0))
             T_T2_7_current = pm.fromTf(pose)
         except:
             continue
@@ -290,7 +290,7 @@ if __name__ == "__main__":
     print [T_T2_C_est.p.x(), T_T2_C_est.p.y(), T_T2_C_est.p.z()]
     print [q[0], q[1], q[2], q[3]]
     while not rospy.is_shutdown():
-        br.sendTransform([T_T2_C_est.p.x(), T_T2_C_est.p.y(), T_T2_C_est.p.z()], [q[0], q[1], q[2], q[3]], rospy.Time.now(), "camera", "torso_link2")
+        br.sendTransform([T_T2_C_est.p.x(), T_T2_C_est.p.y(), T_T2_C_est.p.z()], [q[0], q[1], q[2], q[3]], rospy.Time.now(), "camera", "head_tilt_link")
         rospy.sleep(0.1)
 
 

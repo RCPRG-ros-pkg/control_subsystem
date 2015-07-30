@@ -33,8 +33,8 @@ import math
 
 from ar_track_alvar.msg import *
 import std_msgs.msg
-from barrett_hand_controller_srvs.msg import *
-from barrett_hand_controller_srvs.srv import *
+from barrett_hand_controller_msgs.msg import *
+from barrett_hand_controller_msgs.srv import *
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from geometry_msgs.msg import *

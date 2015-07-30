@@ -101,8 +101,9 @@ if __name__ == '__main__':
     rospy.sleep(1.0)
 
     # save current wrist position
-    listener.waitForTransform('torso_base', prefix+'_arm_7_link', rospy.Time.now(), rospy.Duration(4.0))
-    pose = listener.lookupTransform('torso_base', prefix+'_arm_7_link', rospy.Time(0))
+    time_now = rospy.Time.now() - rospy.Duration(1.0)
+    listener.waitForTransform('torso_base', prefix+'_arm_7_link', time_now, rospy.Duration(4.0))
+    pose = listener.lookupTransform('torso_base', prefix+'_arm_7_link', time_now)
     T_B_W = pm.fromTf(pose)
 
     T_W_T = PyKDL.Frame()    # tool transformation

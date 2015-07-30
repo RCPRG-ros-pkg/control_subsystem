@@ -24,6 +24,6 @@
   <run_depend>std_srvs</run_depend> 
   <run_depend>rtt_std_srvs</run_depend> 
   <run_depend>rtt_barrett_hand_controller</run_depend>
-  <run_depend>rtt_barrett_hand_controller_srvs</run_depend>
+  <run_depend>rtt_barrett_hand_controller_msgs</run_depend>
 
 </package>

@@ -28,8 +28,8 @@
 import roslib; roslib.load_manifest('barrett_hand_controller')
 import rospy
 import sys
-from barrett_hand_controller_srvs.msg import *
-from barrett_hand_controller_srvs.srv import *
+from barrett_hand_controller_msgs.msg import *
+from barrett_hand_controller_msgs.srv import *
 
 def move_hand_client(prefix, f1, f2, f3, spread):
     rospy.wait_for_service('/' + prefix + '_hand/move_hand')
